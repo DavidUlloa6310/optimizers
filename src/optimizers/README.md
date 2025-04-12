@@ -26,11 +26,10 @@ One thing you might have not considered is, in our SGD w/ momentum, we calculate
 To fix this, we can add this velocity to our weights before getting its gradients.
 
 $$
-v_{t+1} = \rho v_t - \eta g(w_t + \rho v_t)
 
-\newline
-
+v_{t+1} = \rho v_t - \eta g(w_t + \rho v_t) \\
 w_{t+1} = w_t + v_{t+1}
+
 $$
 
 ## AdaGrad
