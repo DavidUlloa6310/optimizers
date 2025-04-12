@@ -13,7 +13,7 @@ $$
 The simplest addition to SGD would be considering the "momentum" of your parameter updates. Given the following equation:
 
 $$
-w_{t+1} = w_{t} + v_{t+1} \\\\
+w_{t+1} = w_{t} + v_{t+1} \newline
 v_{t+1} = \rho v_t - \eta g(w_t)
 $$
 
@@ -26,10 +26,8 @@ One thing you might have not considered is, in our SGD w/ momentum, we calculate
 To fix this, we can add this velocity to our weights before getting its gradients.
 
 $$
-
-v_{t+1} = \rho v_t - \eta g(w_t + \rho v_t) \\
-w_{t+1} = w_t + v_{t+1}
-
+v_{t+1} = \rho v_t - \eta g(w_t + \rho v_t) \newline
+w_t+1} = w_t + v_{t+1}
 $$
 
 ## AdaGrad
