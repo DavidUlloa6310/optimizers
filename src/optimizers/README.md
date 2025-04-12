@@ -13,8 +13,10 @@ $$
 The simplest addition to SGD would be considering the "momentum" of your parameter updates. Given the following equation:
 
 $$
-w_{t+1} = w_{t} + v_{t+1} \newline
+\begin{align*}
+w_{t+1} = w_{t} + v_{t+1}\\
 v_{t+1} = \rho v_t - \eta g(w_t)
+\end{align*}
 $$
 
 $v_t$ can be seen as the velocity carried by our gradient update, making $w_t$ the position. Important to know, $\rho$, is unique for each parameter, so you'll need to create a PyTree of velocities.
@@ -26,7 +28,7 @@ One thing you might have not considered is, in our SGD w/ momentum, we calculate
 To fix this, we can add this velocity to our weights before getting its gradients.
 
 $$
-v_{t+1} = \rho v_t - \eta g(w_t + \rho v_t) \newline
+v_{t+1} = \rho v_t - \eta g(w_t + \rho v_t) \\
 w_t+1} = w_t + v_{t+1}
 $$
 
