@@ -27,7 +27,9 @@ To fix this, we can add this velocity to our weights before getting its gradient
 
 $$
 v_{t+1} = \rho v_t - \eta g(w_t + \rho v_t)
+
 \newline
+
 w_{t+1} = w_t + v_{t+1}
 $$
 
