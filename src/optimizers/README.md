@@ -13,7 +13,7 @@ $$
 The simplest addition to SGD would be considering the "momentum" of your parameter updates. Given the following equation:
 
 $$
-w_{t+1} = w_{t} + v_{t+1} \\
+w_{t+1} = w_{t} + v_{t+1} \\\\
 v_{t+1} = \rho v_t - \eta g(w_t)
 $$
 
@@ -26,7 +26,7 @@ One thing you might have not considered is, in our SGD w/ momentum, we calculate
 To fix this, we can add this velocity to our weights before getting its gradients.
 
 $$
-v_{t+1} = \rho v_t - \eta g(w_t + \rho v_t) \\
+v_{t+1} = \rho v_t - \eta g(w_t + \rho v_t) \\\\
 w_{t+1} = w_t + v_{t+1}
 $$
 
@@ -37,7 +37,7 @@ AdaGrad takes an interesting approach by keep a per-parameter sum of the gradien
 The funny part - it is. We end up manipulating the "learning rate" (or multiplier to this gradient) based on this l2 norm, such that parameters which a higher gradient l2 norm update less, and those with a higher gradient l2 norm update more.
 
 $$
-v_{t+1} = v_{t} + g(w_i)^2 \\
+v_{t+1} = v_{t} + g(w_i)^2 \\\\
 w_{t+1} = w_{t} -\frac{\eta}{ϵ + \sqrt{v_{t+1}}}g(w_{t})
 $$
 
@@ -48,7 +48,7 @@ where $\epsilon$ is a very small value (on the order of $10^{-9}$) to prevent a 
 Very similar to AdaGrad, RMSProp introduces a discount factor, $\beta$, which controls the influence of new gradients vs old ones in our velocity term.
 
 $$
-v_{t+1} = \beta v_{t} + (1 - \beta) * g(w_t)^2 \\
+v_{t+1} = \beta v_{t} + (1 - \beta) * g(w_t)^2 \\\\
 w_{t+1} = w_{t} - \frac{\eta}{\epsilon + \sqrt{v_{t+1}}} g(w_t)
 $$
 
@@ -57,10 +57,10 @@ $$
 Finally, we get to Adam - the go-to optimizer for most ML workloads. Adam is very similar to RMSProp, but re-introduces the momentum term used in previous optimizers. Momentum helps prevents our model from getting stuck in local minima, while our velocity allows our gradients to jump quickly through "flat" areas of our loss.
 
 $$
-m_{t+1} = \beta_1 m_t + (1 - \beta_1) * g(w_t) \\
-v_{t+1} = \beta_2 v_t + (1 - \beta_2) * g(w_t)^2 \\
-\hat{m_{t+1}} = \frac{m_{t+1}}{1-\beta_1^{t+1}} \\
-\hat{v_{t+1}} = \frac{v_{t+1}}{1-\beta_2^{t+1}} \\
+m_{t+1} = \beta_1 m_t + (1 - \beta_1) * g(w_t) \\\\
+v_{t+1} = \beta_2 v_t + (1 - \beta_2) * g(w_t)^2 \\\\
+\hat{m_{t+1}} = \frac{m_{t+1}}{1-\beta_1^{t+1}} \\\\
+\hat{v_{t+1}} = \frac{v_{t+1}}{1-\beta_2^{t+1}} \\\\
 w_{t+1} = \frac{\eta}{\epsilon + \sqrt{\hat{v_{t+1}}}} * \hat{m_{t+1}}
 $$
 
