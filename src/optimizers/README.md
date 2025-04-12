@@ -31,7 +31,7 @@ $$
 \begin{align*}
 v_{t+1} = \rho v_t - \eta g(w_t + \rho v_t) \\
 w_{t+1} = w_t + v_{t+1}
-\end(align*)
+\end{align*}
 $$
 
 ## AdaGrad
