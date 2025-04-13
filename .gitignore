@@ -1,1 +1,10 @@
 venv/
+
+# Python package build artifacts
+*.egg-info/
+dist/
+build/
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
