@@ -36,9 +36,9 @@ $$
 
 ## AdaGrad
 
-AdaGrad takes an interesting approach by keep a per-parameter sum of the gradients and updates each accordingly. You might notice the $\sqrt{v_{t_1}}$ is oddly similar to an l2 norm.
+AdaGrad takes an interesting approach by keep a per-parameter sum of the gradients and updates each accordingly. You might notice the $\sqrt{v_{t_1}}$ is oddly similar to an L2 norm.
 
-The funny part - it is. We end up manipulating the "learning rate" (or multiplier to this gradient) based on this l2 norm, such that parameters which a higher gradient l2 norm update less, and those with a higher gradient l2 norm update more.
+The funny part - it is. We end up manipulating the "learning rate" (or multiplier to this gradient) based on this L2 norm, such that parameters which a higher gradient L2 norm update less, and those with a lower gradient L2 norm update more.
 
 $$
 \begin{align*}
