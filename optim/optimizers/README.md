@@ -5,7 +5,7 @@
 Stochastic Gradient Descent is the simplest optimizer you could implement. In the ["Intro to Gradient Descent"](https://gist.github.com/DavidUlloa6310/b8e93cb20e60f2a9d626a9bfe0a8b0bf) notebook, this is the optimizer we implement, because its simplicity.
 
 $$
-w_{t+1} = w_t - \eta\g(w_t)
+w_{t+1} = w_t - \eta g(w_t)
 $$
 
 ## SGD w/ Momentum
