@@ -14,8 +14,8 @@ The simplest addition to SGD would be considering the "momentum" of your paramet
 
 $$
 \begin{align*}
-w_{t+1} = w_{t} + v_{t+1} \\
-v_{t+1} = \rho v_t - \eta g(w_t)
+v_{t+1} = \rho v_t - \eta g(w_t) \\
+w_{t+1} = w_{t} + v_{t+1}
 \end{align*}
 $$
 
