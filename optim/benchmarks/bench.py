@@ -10,6 +10,7 @@ import jax.numpy as jnp
 from flax.training import train_state
 from tqdm import tqdm
 from sklearn.feature_extraction.text import CountVectorizer
+import optax
 
 from optim.benchmarks.datasets import (get_mnist, get_cifar,
                                        zca_whitening, get_imdb, one_hot_encode)
@@ -155,129 +156,129 @@ def eval_model(state, eval_fn, config):
     return test_loss, test_accuracy
 
 
-optimizers = [
-    ("SGD", sgd(0.001)),
-    ("SGD_Momentum", sgd_momentum(0.01, 0.9)),
-    ("Nesterov_SGD", sgd_nesterov(0.01, 0.9)),
-    ("Adagrad", adagrad(0.001)),
-    ("RMSProp", rmsprop(0.001)),
-    ("Adam", adam(0.001))
-]
+def bench_mnist(*optimizers: tuple[optax.GradientTransformation, ...]):
+    mnist_train, mnist_test = get_mnist()
+    mnist_train['image'] = mnist_train['image'].reshape(-1, 784)
+    mnist_test['image'] = mnist_test['image'].reshape(-1, 784)
+
+    print("MNIST Training Data Shapes:\n", "Images: ",
+          mnist_train['image'].shape, "\nLabels: ", mnist_train['label'].shape, "\n")
+    print("MNIST Test Data Shapes: \n", "Images: ",
+          mnist_test['image'].shape, "\nLabels: ", mnist_test['label'].shape)
+
+    mnist_config = TrainingConfig(
+        epochs=40,
+        batch_size=128,
+        data=mnist_train['image'],
+        labels=mnist_train['label'],
+    )
+
+    for name, optimizer in optimizers:
+        model = MNISTRegression()
+        rng, model_rng = jax.random.split(rng)
+
+        params = model.init(model_rng, jnp.ones((1, 784)))
+        state = train_state.TrainState.create(
+            apply_fn=model.apply, params=params, tx=optimizer)
+
+        state, metrics = train_model(
+            state, mnist_update_fn, mnist_config, rng)
+        test_loss, test_accuracy = eval_model(state, mnist_eval_fn, TestConfig(
+            batch_size=mnist_config.batch_size,
+            data=mnist_test['image'],
+            labels=mnist_test['label']
+        ))
+
+        graph_results(metrics, "MNIST", name, args.graph_directory)
+
+
+def bench_cifar(*optimizers: tuple[optax.GradientTransformation, ...]):
+    cifar_train, cifar_test = get_cifar()
+    print("CIFAR-10 Training Data Shapes:\n", "Images: ",
+          cifar_train['image'].shape, "\nLabels: ", cifar_train['label'].shape, "\n")
+    print("CIFAR-10 Test Data Shapes: \n", "Images: ",
+          cifar_test['image'].shape, "\nLabels: ", cifar_test['label'].shape)
+
+    cifar_config = TrainingConfig(
+        epochs=40,
+        batch_size=128,
+        data=cifar_train['image'],
+        labels=cifar_train['label']
+    )
+    for name, optimizer in optimizers:
+        model = CNN()
+        rng, model_rng = jax.random.split(rng)
+
+        params = model.init(model_rng, jnp.ones((1, 32, 32, 3)), True)
+        state = train_state.TrainState.create(
+            apply_fn=model.apply, params=params, tx=optimizer)
+        state, metrics = train_model(
+            state, cifar_update_fn, cifar_config, rng=rng)
+        test_loss, test_accuracy = eval_model(state, cifar_eval_fn, TestConfig(
+            batch_size=cifar_config.batch_size,
+            data=cifar_test['image'],
+            labels=cifar_test['label']
+        ))
+
+        graph_results(metrics, "Cifar", name, args.graph_directory)
+
+
+def bench_imdb(*optimizers: tuple[optax.GradientTransformation, ...]):
+    imdb_train, imdb_test = get_imdb()
+    print("IMDB Training Data:\n", "Images: ",
+          imdb_train['text'].shape, "\nLabels: ", imdb_train['label'].shape, "\n")
+    print("IMDB Test Data: \n", "Images: ",
+          imdb_train['text'].shape, "\nLabels: ", imdb_test['label'].shape)
+
+    vectorizer = CountVectorizer(max_features=10_000)
+    imdb_train['text'] = one_hot_encode(
+        vectorizer, imdb_train['text'], train=True)
+    imdb_test['text'] = one_hot_encode(vectorizer, imdb_test['text'])
+
+    model = IMDBClassifier()
+    rng, model_rng = jax.random.split(rng)
+
+    params = model.init(model_rng, jnp.ones((1, 10_000)), True)
+    imdb_config = TrainingConfig(
+        epochs=180,
+        batch_size=128,
+        data=imdb_train['text'],
+        labels=imdb_train['label']
+    )
+
+    for name, optimizer in optimizers:
+        state = train_state.TrainState.create(
+            apply_fn=model.apply, params=params, tx=optimizer)
+
+        state, metrics = train_model(
+            state, imdb_update_fn, imdb_config, rng=rng)
+        test_loss, test_accuracy = eval_model(state, imdb_eval_fn, TestConfig(
+            batch_size=imdb_config.batch_size,
+            data=imdb_test['text'],
+            labels=imdb_test['label']
+        ))
+
+        graph_results(metrics, "IMDB", name, args.graph_directory)
+
 
 if __name__ == "__main__":
     args = parse_arguments()
     rng = jax.random.key(42)
-    mnist_train, mnist_test = get_mnist()
 
-    # ==== MNIST ====
+    optimizers = [
+        ("SGD", sgd(0.001)),
+        ("SGD_Momentum", sgd_momentum(0.01, 0.9)),
+        ("Nesterov_SGD", sgd_nesterov(0.01, 0.9)),
+        ("Adagrad", adagrad(0.001)),
+        ("RMSProp", rmsprop(0.001)),
+        ("Adam", adam(0.001))
+    ]
+
     if args.mnist:
-        # Logistic regression model expects (batch_size, flattened_image)
-        mnist_train['image'] = mnist_train['image'].reshape(-1, 784)
-        mnist_test['image'] = mnist_test['image'].reshape(-1, 784)
+        bench_mnist(*optimizers)
 
-        print("MNIST Training Data Shapes:\n", "Images: ",
-              mnist_train['image'].shape, "\nLabels: ", mnist_train['label'].shape, "\n")
-        print("MNIST Test Data Shapes: \n", "Images: ",
-              mnist_test['image'].shape, "\nLabels: ", mnist_test['label'].shape)
-
-        mnist_config = TrainingConfig(
-            epochs=40,
-            batch_size=128,
-            data=mnist_train['image'],
-            labels=mnist_train['label'],
-        )
-
-        for name, optimizer in optimizers:
-            model = MNISTRegression()
-            rng, model_rng = jax.random.split(rng)
-
-            params = model.init(model_rng, jnp.ones((1, 784)))
-            state = train_state.TrainState.create(
-                apply_fn=model.apply, params=params, tx=optimizer)
-
-            state, metrics = train_model(
-                state, mnist_update_fn, mnist_config, rng)
-            test_loss, test_accuracy = eval_model(state, mnist_eval_fn, TestConfig(
-                batch_size=mnist_config.batch_size,
-                data=mnist_test['image'],
-                labels=mnist_test['label']
-            ))
-
-            graph_results(metrics,
-                          "MNIST",
-                          name,
-                          args.graph_directory)
-
-    # ==== Cifar ====
     if args.cifar:
-        cifar_train, cifar_test = get_cifar()
-        print("CIFAR-10 Training Data Shapes:\n", "Images: ",
-              cifar_train['image'].shape, "\nLabels: ", cifar_train['label'].shape, "\n")
-        print("CIFAR-10 Test Data Shapes: \n", "Images: ",
-              cifar_test['image'].shape, "\nLabels: ", cifar_test['label'].shape)
+        bench_cifar(*optimizers)
 
-        cifar_config = TrainingConfig(
-            epochs=40,
-            batch_size=128,
-            data=cifar_train['image'],
-            labels=cifar_train['label']
-        )
-        for name, optimizer in optimizers:
-            model = CNN()
-            rng, model_rng = jax.random.split(rng)
-
-            params = model.init(model_rng, jnp.ones((1, 32, 32, 3)), True)
-            state = train_state.TrainState.create(
-                apply_fn=model.apply, params=params, tx=optimizer)
-            state, metrics = train_model(
-                state, cifar_update_fn, cifar_config, rng=rng)
-            test_loss, test_accuracy = eval_model(state, cifar_eval_fn, TestConfig(
-                batch_size=cifar_config.batch_size,
-                data=cifar_test['image'],
-                labels=cifar_test['label']
-            ))
-
-            graph_results(metrics,
-                          "Cifar",
-                          name,
-                          args.graph_directory)
-    # ==== IMDB =====
     if args.imdb:
-        imdb_train, imdb_test = get_imdb()
-        print("IMDB Training Data:\n", "Images: ",
-              imdb_train['text'].shape, "\nLabels: ", imdb_train['label'].shape, "\n")
-        print("IMDB Test Data: \n", "Images: ",
-              imdb_train['text'].shape, "\nLabels: ", imdb_test['label'].shape)
-
-        vectorizer = CountVectorizer(max_features=10_000)
-        imdb_train['text'] = one_hot_encode(
-            vectorizer, imdb_train['text'], train=True)
-        imdb_test['text'] = one_hot_encode(vectorizer, imdb_test['text'])
-
-        model = IMDBClassifier()
-        rng, model_rng = jax.random.split(rng)
-
-        params = model.init(model_rng, jnp.ones((1, 10_000)), True)
-        imdb_config = TrainingConfig(
-            epochs=180,
-            batch_size=128,
-            data=imdb_train['text'],
-            labels=imdb_train['label']
-        )
-
-        for name, optimizer in optimizers:
-            state = train_state.TrainState.create(
-                apply_fn=model.apply, params=params, tx=optimizer)
-
-            state, metrics = train_model(
-                state, imdb_update_fn, imdb_config, rng=rng)
-            test_loss, test_accuracy = eval_model(state, imdb_eval_fn, TestConfig(
-                batch_size=imdb_config.batch_size,
-                data=imdb_test['text'],
-                labels=imdb_test['label']
-            ))
-
-            graph_results(metrics,
-                          "IMDB",
-                          name,
-                          args.graph_directory)
+        bench_imdb(*optimizers)
