@@ -28,3 +28,8 @@ Homepage = "https://github.com/davidulloa6310/optimizers"
 
 [tool.setuptools.packages]
 find = {}
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.10",
+]

@@ -1,12 +1,13 @@
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import flax.linen as nn
 import optax
 
 
 def l2_norm(grads):
     leaves, _ = jax.tree_util.tree_flatten(grads)
     return jnp.sqrt(sum([jnp.sum(leaf**2) for leaf in leaves]))
+
 
 # ===== MNIST Utils ====
 
@@ -15,6 +16,7 @@ class MNISTRegression(nn.Module):
     """
     Logistic Regression Model for MNIST, as used in the Adam paper.
     """
+
     @nn.compact
     def __call__(self, x):
         x = nn.Dense(features=784)(x)
@@ -24,18 +26,17 @@ class MNISTRegression(nn.Module):
 
 @jax.jit
 def mnist_update_fn(state, batch, rng):
-
     def loss_fn(params, state, x, y):
         logits = state.apply_fn(params, x)
-        loss = jnp.mean(
-            optax.softmax_cross_entropy_with_integer_labels(logits, y))
+        loss = jnp.mean(optax.softmax_cross_entropy_with_integer_labels(logits, y))
 
-        accuracy = jnp.mean(jnp.argmax(logits, axis=- 1) == y)
+        accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y)
         return loss, accuracy
 
     x, y = batch
-    (loss, accuracy), grads = jax.value_and_grad(
-        loss_fn, has_aux=True)(state.params, state, x, y)
+    (loss, accuracy), grads = jax.value_and_grad(loss_fn, has_aux=True)(
+        state.params, state, x, y
+    )
     state = state.apply_gradients(grads=grads)
     grad_norm = l2_norm(grads)
 
@@ -46,8 +47,9 @@ def mnist_update_fn(state, batch, rng):
 def mnist_eval_fn(state, x, y):
     logits = state.apply_fn(state.params, x)
     loss = jnp.mean(optax.softmax_cross_entropy_with_integer_labels(logits, y))
-    accuracy = jnp.mean(jnp.argmax(logits, axis=- 1) == y)
+    accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y)
     return loss, accuracy
+
 
 # ===== Cifar Utils ====
 
@@ -56,6 +58,7 @@ class CNN(nn.Module):
     """
     CNN Model for CIFAR-10, as used in the Adam paper.
     """
+
     @nn.compact
     def __call__(self, x: jnp.ndarray, training: bool):
         x = nn.Dropout(rate=0.2, deterministic=not training)(x)
@@ -83,20 +86,17 @@ class CNN(nn.Module):
 
 @jax.jit
 def cifar_update_fn(state, batch, rng):
-
     def loss_fn(params, state, x, y):
-        logits = state.apply_fn(params, x, training=True, rngs={
-            "dropout": rng
-        })
-        loss = jnp.mean(
-            optax.softmax_cross_entropy_with_integer_labels(logits, y))
+        logits = state.apply_fn(params, x, training=True, rngs={"dropout": rng})
+        loss = jnp.mean(optax.softmax_cross_entropy_with_integer_labels(logits, y))
 
-        accuracy = jnp.mean(jnp.argmax(logits, axis=- 1) == y)
+        accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y)
         return loss, accuracy
 
     x, y = batch
-    (loss, accuracy), grads = jax.value_and_grad(
-        loss_fn, has_aux=True)(state.params, state, x, y)
+    (loss, accuracy), grads = jax.value_and_grad(loss_fn, has_aux=True)(
+        state.params, state, x, y
+    )
     state = state.apply_gradients(grads=grads)
     grad_norm = l2_norm(grads)
 
@@ -107,8 +107,9 @@ def cifar_update_fn(state, batch, rng):
 def cifar_eval_fn(state, x, y):
     logits = state.apply_fn(state.params, x, training=False)
     loss = jnp.mean(optax.softmax_cross_entropy_with_integer_labels(logits, y))
-    accuracy = jnp.mean(jnp.argmax(logits, axis=- 1) == y)
+    accuracy = jnp.mean(jnp.argmax(logits, axis=-1) == y)
     return loss, accuracy
+
 
 # ===== IMDB Utils ====
 
@@ -117,6 +118,7 @@ class IMDBClassifier(nn.Module):
     """
     Dense layer with heavy dropout, as used in the Adam paper.
     """
+
     @nn.compact
     def __call__(self, x, training):
         x = nn.Dropout(rate=0.5, deterministic=not training)(x)
@@ -126,11 +128,8 @@ class IMDBClassifier(nn.Module):
 
 @jax.jit
 def imdb_update_fn(state, batch, rng):
-
     def loss_fn(params, state, x, y, rng):
-        logits = state.apply_fn(params, x, training=True, rngs={
-            "dropout": rng
-        })
+        logits = state.apply_fn(params, x, training=True, rngs={"dropout": rng})
         logits = jnp.squeeze(logits, axis=-1)
         loss = jnp.mean(optax.sigmoid_binary_cross_entropy(logits, y))
 
@@ -140,8 +139,9 @@ def imdb_update_fn(state, batch, rng):
         return loss, accuracy
 
     x, y = batch
-    (loss, accuracy), grads = jax.value_and_grad(
-        loss_fn, has_aux=True)(state.params, state, x, y, rng)
+    (loss, accuracy), grads = jax.value_and_grad(loss_fn, has_aux=True)(
+        state.params, state, x, y, rng
+    )
     state = state.apply_gradients(grads=grads)
     grad_norm = l2_norm(grads)
 
