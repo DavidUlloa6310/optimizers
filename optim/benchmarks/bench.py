@@ -55,73 +55,63 @@ class Metrics:
     grad_norm: list = field(default_factory=list)
 
 
-def parse_arguments():
-    parser = argparse.ArgumentParser(description="Process a directory.")
-    parser.add_argument(
-        "--graph-directory",
-        type=str,
-        required=True,
-        help="Path to the directory to process",
-    )
-
-    parser.add_argument(
-        "--mnist", action="store_true", help="Should benchmark MNIST dataset"
-    )
-
-    parser.add_argument(
-        "--cifar", action="store_true", help="Should benchmark Cifar dataset"
-    )
-
-    parser.add_argument(
-        "--imdb", action="store_true", help="Should benchmark IMDB dataset"
-    )
-
-    args = parser.parse_args()
-    if not os.path.isdir(args.graph_directory):
-        os.makedirs(args.graph_directory)
-
-    return args
+@dataclass
+class BenchResult:
+    optimizer: str
+    metrics: Metrics
+    test_loss: float
+    test_accuracy: float
 
 
-def batch_iterator(data, labels, batch_size):
+def _batch_iterator(data, labels, batch_size):
     num_samples = data.shape[0]
     for start_i in range(0, num_samples, batch_size):
         end_i = min(start_i + batch_size, num_samples)
         yield data[start_i:end_i], labels[start_i:end_i]
 
 
-def graph_results(metrics: Metrics, dataset: str, optimizer: str, path: str):
+def graph_dataset_benches(results: list[BenchResult], dataset: str, path: str):
     # Assuming that the number of batches is the length of the loss list.
-    batches = len(metrics.loss)
+    batches = len(results[0].metrics.loss)
     x_axis = np.linspace(1, batches, batches)
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(24, 6))
 
     ax1.set_xlabel("Batch")
     ax1.set_ylabel("Loss", color="blue")
-    ax1.plot(x_axis, metrics.loss, color="blue")
-    ax1.set_title(f"Loss ({dataset}, {optimizer})")
+    ax1.set_title(f"Loss ({dataset})")
     ax1.tick_params(axis="y", labelcolor="blue")
     ax1.grid(True, linestyle="--", alpha=0.7)
 
     ax2.set_xlabel("Batch")
     ax2.set_ylabel("Accuracy", color="red")
-    ax2.plot(x_axis, metrics.accuracy, color="red")
-    ax2.set_title(f"Accuracy ({dataset}, {optimizer})")
+    ax2.set_title(f"Accuracy ({dataset})")
     ax2.tick_params(axis="y", labelcolor="red")
     ax2.grid(True, linestyle="--", alpha=0.7)
 
     ax3.set_xlabel("Batch")
     ax3.set_ylabel("Grad Norm", color="green")
-    ax3.plot(x_axis, metrics.grad_norm, color="green")
-    ax3.set_title(f"Grad Norm ({dataset}, {optimizer})")
+    ax3.set_title(f"Grad Norm ({dataset})")
     ax3.tick_params(axis="y", labelcolor="green")
     ax3.grid(True, linestyle="--", alpha=0.7)
 
-    fig.suptitle(f"Training Metrics ({dataset}, {optimizer})", fontsize=16)
+    blues = [plt.get_cmap("Blues")(i) for i in np.linspace(0.3, 1, len(results))]
+    reds = [plt.get_cmap("Reds")(i) for i in np.linspace(0.3, 1, len(results))]
+    greens = [plt.get_cmap("Greens")(i) for i in np.linspace(0.3, 1, len(results))]
+    for i, result in enumerate(results):
+        ax1.plot(x_axis, result.metrics.loss, color=blues[i], label=result.optimizer)
+        ax2.plot(x_axis, result.metrics.accuracy, color=reds[i], label=result.optimizer)
+        ax3.plot(
+            x_axis, result.metrics.grad_norm, color=greens[i], label=result.optimizer
+        )
+
+    fig.suptitle(f"Training Metrics ({dataset})", fontsize=16)
     fig.tight_layout(rect=[0, 0, 1, 0.95])  # Leave space for the suptitle
 
-    plt.savefig(os.path.join(path, f"{dataset}_{optimizer}.png"))
+    ax1.legend()
+    ax2.legend()
+    ax3.legend()
+    plt.savefig(os.path.join(path, f"{dataset}_results.png"))
 
 
 def train_model(state, update_fn, config, rng):
@@ -129,7 +119,7 @@ def train_model(state, update_fn, config, rng):
     batches = math.ceil(len(config.data) / config.batch_size)
     for epoch in tqdm(range(config.epochs)):
         loss, accuracy = 0, 0
-        get_batch = batch_iterator(config.data, config.labels, config.batch_size)
+        get_batch = _batch_iterator(config.data, config.labels, config.batch_size)
         for x, y in get_batch:
             rng, dropout_rng = jax.random.split(rng)
             state, batch_loss, batch_accuracy, grad_norm = update_fn(state, (x, y), rng)
@@ -147,7 +137,7 @@ def train_model(state, update_fn, config, rng):
 
 
 def eval_model(state, eval_fn, config):
-    get_batch = batch_iterator(config.data, config.labels, config.batch_size)
+    get_batch = _batch_iterator(config.data, config.labels, config.batch_size)
     batches = math.ceil(len(config.data) / config.batch_size)
 
     test_loss, test_accuracy = 0, 0
@@ -162,7 +152,9 @@ def eval_model(state, eval_fn, config):
     return test_loss, test_accuracy
 
 
-def bench_mnist(*optimizers: tuple[optax.GradientTransformation, ...]):
+def bench_mnist(
+    *optimizers: tuple[optax.GradientTransformation, ...],
+) -> list[BenchResult]:
     rng = jax.random.key(42)
     mnist_train, mnist_test = get_mnist()
     mnist_train["image"] = mnist_train["image"].reshape(-1, 784)
@@ -191,6 +183,7 @@ def bench_mnist(*optimizers: tuple[optax.GradientTransformation, ...]):
         labels=mnist_train["label"],
     )
 
+    results = []
     for name, optimizer in optimizers:
         model = MNISTRegression()
         rng, model_rng = jax.random.split(rng)
@@ -210,11 +203,13 @@ def bench_mnist(*optimizers: tuple[optax.GradientTransformation, ...]):
                 labels=mnist_test["label"],
             ),
         )
+        results.append(BenchResult(name, metrics, test_loss, test_accuracy))
+    return results
 
-        graph_results(metrics, "MNIST", name, args.graph_directory)
 
-
-def bench_cifar(*optimizers: tuple[optax.GradientTransformation, ...]):
+def bench_cifar(
+    *optimizers: tuple[optax.GradientTransformation, ...],
+) -> list[BenchResult]:
     rng = jax.random.key(42)
     cifar_train, cifar_test = get_cifar()
     print(
@@ -239,6 +234,8 @@ def bench_cifar(*optimizers: tuple[optax.GradientTransformation, ...]):
         data=cifar_train["image"],
         labels=cifar_train["label"],
     )
+
+    results = []
     for name, optimizer in optimizers:
         model = CNN()
         rng, model_rng = jax.random.split(rng)
@@ -257,11 +254,13 @@ def bench_cifar(*optimizers: tuple[optax.GradientTransformation, ...]):
                 labels=cifar_test["label"],
             ),
         )
+        results.append(BenchResult(name, metrics, test_loss, test_accuracy))
+    return results
 
-        graph_results(metrics, "Cifar", name, args.graph_directory)
 
-
-def bench_imdb(*optimizers: tuple[optax.GradientTransformation, ...]):
+def bench_imdb(
+    *optimizers: tuple[optax.GradientTransformation, ...],
+) -> list[BenchResult]:
     rng = jax.random.key(42)
     imdb_train, imdb_test = get_imdb()
     print(
@@ -292,6 +291,7 @@ def bench_imdb(*optimizers: tuple[optax.GradientTransformation, ...]):
         epochs=180, batch_size=128, data=imdb_train["text"], labels=imdb_train["label"]
     )
 
+    results = []
     for name, optimizer in optimizers:
         state = train_state.TrainState.create(
             apply_fn=model.apply, params=params, tx=optimizer
@@ -307,12 +307,44 @@ def bench_imdb(*optimizers: tuple[optax.GradientTransformation, ...]):
                 labels=imdb_test["label"],
             ),
         )
+        results.append(BenchResult(name, metrics, test_loss, test_accuracy))
+    return results
 
-        graph_results(metrics, "IMDB", name, args.graph_directory)
+
+def _parse_arguments():
+    parser = argparse.ArgumentParser(description="Process a directory.")
+    parser.add_argument(
+        "--graph-directory",
+        type=str,
+        required=True,
+        help="Path to the directory to process",
+    )
+
+    parser.add_argument(
+        "--all", action="store_true", help="Should benchmark all datasets"
+    )
+
+    parser.add_argument(
+        "--mnist", action="store_true", help="Should benchmark MNIST dataset"
+    )
+
+    parser.add_argument(
+        "--cifar", action="store_true", help="Should benchmark Cifar dataset"
+    )
+
+    parser.add_argument(
+        "--imdb", action="store_true", help="Should benchmark IMDB dataset"
+    )
+
+    args = parser.parse_args()
+    if not os.path.isdir(args.graph_directory):
+        os.makedirs(args.graph_directory)
+
+    return args
 
 
 if __name__ == "__main__":
-    args = parse_arguments()
+    args = _parse_arguments()
     rng = jax.random.key(42)
 
     optimizers = [
@@ -324,11 +356,15 @@ if __name__ == "__main__":
         ("Adam", adam(0.001)),
     ]
 
-    if args.mnist:
-        bench_mnist(*optimizers)
+    if args.all or args.mnist:
+        mnist_results = bench_mnist(*optimizers)
+        graph_dataset_benches(mnist_results, "MNIST", args.graph_directory)
 
-    if args.cifar:
-        bench_cifar(*optimizers)
+    if args.all or args.cifar:
+        cifar_results = bench_cifar(*optimizers)
+        graph_dataset_benches(cifar_results, "Cifar", args.graph_directory)
 
-    if args.imdb:
-        bench_imdb(*optimizers)
+    if args.all or args.imdb:
+        imdb_results = bench_imdb(*optimizers)
+        graph_dataset_benches(imdb_results, "IMDB", args.graph_directory)
+        graph_dataset_benches(imdb_results, "IMDB", args.graph_directory)
