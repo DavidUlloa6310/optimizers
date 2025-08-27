@@ -7,14 +7,14 @@ def rmsprop(rho, beta=0.9):
     EPSILON = 1e-9
 
     def init_fn(params):
-        return {"velocity": jax.tree_util.tree_map(lambda p: jnp.zeros_like(p), params)}
+        return {"velocity": jax.tree.map(lambda p: jnp.zeros_like(p), params)}
 
     def update_fn(grads, state, params=None):
         velocity = state["velocity"]
-        new_velocity = jax.tree_util.tree_map(
+        new_velocity = jax.tree.map(
             lambda v, g: beta * v + (1 - beta) * g**2, velocity, grads
         )
-        updates = jax.tree_util.tree_map(
+        updates = jax.tree.map(
             lambda v, g: -rho * g / (EPSILON + jnp.sqrt(v)), new_velocity, grads
         )
         return updates, {"velocity": new_velocity}

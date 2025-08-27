@@ -69,6 +69,10 @@ def _batch_iterator(data, labels, batch_size):
         end_i = min(start_i + batch_size, num_samples)
         yield data[start_i:end_i], labels[start_i:end_i]
 
+def _smooth_data(data: jnp.ndarray, window_size: int):
+    if len(data) < window_size:
+        return data
+    return jnp.convolve(data, jnp.ones(window_size) / window_size, mode = "valid")
 
 def graph_dataset_benches(results: list[BenchResult], dataset: str, path: str):
     # Assuming that the number of batches is the length of the loss list.
@@ -98,11 +102,16 @@ def graph_dataset_benches(results: list[BenchResult], dataset: str, path: str):
     blues = [plt.get_cmap("Blues")(i) for i in np.linspace(0.3, 1, len(results))]
     reds = [plt.get_cmap("Reds")(i) for i in np.linspace(0.3, 1, len(results))]
     greens = [plt.get_cmap("Greens")(i) for i in np.linspace(0.3, 1, len(results))]
+
+    SMOOTHING_WINDOW = 20
     for i, result in enumerate(results):
-        ax1.plot(x_axis, result.metrics.loss, color=blues[i], label=result.optimizer)
-        ax2.plot(x_axis, result.metrics.accuracy, color=reds[i], label=result.optimizer)
+        smoothed_loss = _smooth_data(result.metrics.loss, SMOOTHING_WINDOW)
+        smoothed_accuracy = _smooth_data(result.metrics.accuracy, SMOOTHING_WINDOW)
+        smoothed_grad_norm = _smooth_data(result.metrics.grad_norm, SMOOTHING_WINDOW)
+        ax1.plot(x_axis, smoothed_loss, color=blues[i], label=result.optimizer)
+        ax2.plot(x_axis, smoothed_accuracy, color=reds[i], label=result.optimizer)
         ax3.plot(
-            x_axis, result.metrics.grad_norm, color=greens[i], label=result.optimizer
+            x_axis, smoothed_grad_norm, color=greens[i], label=result.optimizer
         )
 
     fig.suptitle(f"Training Metrics ({dataset})", fontsize=16)
@@ -366,5 +375,4 @@ if __name__ == "__main__":
 
     if args.all or args.imdb:
         imdb_results = bench_imdb(*optimizers)
-        graph_dataset_benches(imdb_results, "IMDB", args.graph_directory)
         graph_dataset_benches(imdb_results, "IMDB", args.graph_directory)
