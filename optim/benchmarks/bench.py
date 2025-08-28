@@ -29,6 +29,7 @@ from optim.optimizers.adam import adam
 from optim.optimizers.nesterov_sgd import sgd_nesterov
 from optim.optimizers.rmsprop import rmsprop
 from optim.optimizers.sgd import sgd, sgd_momentum
+from optim.optimizers.muon import muon, label_2d
 
 
 @dataclass
@@ -69,15 +70,16 @@ def _batch_iterator(data, labels, batch_size):
         end_i = min(start_i + batch_size, num_samples)
         yield data[start_i:end_i], labels[start_i:end_i]
 
+
 def _smooth_data(data: jnp.ndarray, window_size: int):
     if len(data) < window_size:
         return data
-    return jnp.convolve(data, jnp.ones(window_size) / window_size, mode = "valid")
+    return jnp.convolve(data, jnp.ones(window_size) / window_size, mode="valid")
+
 
 def graph_dataset_benches(results: list[BenchResult], dataset: str, path: str):
     # Assuming that the number of batches is the length of the loss list.
     batches = len(results[0].metrics.loss)
-    x_axis = np.linspace(1, batches, batches)
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(24, 6))
 
@@ -99,17 +101,28 @@ def graph_dataset_benches(results: list[BenchResult], dataset: str, path: str):
     ax3.tick_params(axis="y", labelcolor="green")
     ax3.grid(True, linestyle="--", alpha=0.7)
 
-    blues = [plt.get_cmap("Blues")(i) for i in np.linspace(0.3, 1, len(results))]
+    blues = [plt.get_cmap("Blues")(i)
+             for i in np.linspace(0.3, 1, len(results))]
     reds = [plt.get_cmap("Reds")(i) for i in np.linspace(0.3, 1, len(results))]
-    greens = [plt.get_cmap("Greens")(i) for i in np.linspace(0.3, 1, len(results))]
+    greens = [plt.get_cmap("Greens")(i)
+              for i in np.linspace(0.3, 1, len(results))]
 
-    SMOOTHING_WINDOW = 20
+    SMOOTHING_WINDOW = 40
     for i, result in enumerate(results):
-        smoothed_loss = _smooth_data(result.metrics.loss, SMOOTHING_WINDOW)
-        smoothed_accuracy = _smooth_data(result.metrics.accuracy, SMOOTHING_WINDOW)
-        smoothed_grad_norm = _smooth_data(result.metrics.grad_norm, SMOOTHING_WINDOW)
+        smoothed_loss = _smooth_data(
+            jnp.array(result.metrics.loss), SMOOTHING_WINDOW)
+        smoothed_accuracy = _smooth_data(
+            jnp.array(result.metrics.accuracy), SMOOTHING_WINDOW)
+        smoothed_grad_norm = _smooth_data(
+            jnp.array(result.metrics.grad_norm), SMOOTHING_WINDOW)
+
+        # x-axis accounting for smoothing (which causes shrinking)
+        x_axis = np.linspace(
+            SMOOTHING_WINDOW, len(result.metrics.loss), len(smoothed_loss)
+        )
         ax1.plot(x_axis, smoothed_loss, color=blues[i], label=result.optimizer)
-        ax2.plot(x_axis, smoothed_accuracy, color=reds[i], label=result.optimizer)
+        ax2.plot(x_axis, smoothed_accuracy,
+                 color=reds[i], label=result.optimizer)
         ax3.plot(
             x_axis, smoothed_grad_norm, color=greens[i], label=result.optimizer
         )
@@ -128,10 +141,12 @@ def train_model(state, update_fn, config, rng):
     batches = math.ceil(len(config.data) / config.batch_size)
     for epoch in tqdm(range(config.epochs)):
         loss, accuracy = 0, 0
-        get_batch = _batch_iterator(config.data, config.labels, config.batch_size)
+        get_batch = _batch_iterator(
+            config.data, config.labels, config.batch_size)
         for x, y in get_batch:
             rng, dropout_rng = jax.random.split(rng)
-            state, batch_loss, batch_accuracy, grad_norm = update_fn(state, (x, y), rng)
+            state, batch_loss, batch_accuracy, grad_norm = update_fn(
+                state, (x, y), rng)
 
             metrics.loss.append(batch_loss)
             metrics.accuracy.append(batch_accuracy)
@@ -141,7 +156,8 @@ def train_model(state, update_fn, config, rng):
 
         loss /= batches
         accuracy /= batches
-        print(f"Epoch {epoch + 1}: Loss: {loss:.4f}, Train Accuracy: {accuracy:.4f}")
+        print(
+            f"Epoch {epoch + 1}: Loss: {loss:.4f}, Train Accuracy: {accuracy:.4f}")
     return state, metrics
 
 
@@ -253,7 +269,8 @@ def bench_cifar(
         state = train_state.TrainState.create(
             apply_fn=model.apply, params=params, tx=optimizer
         )
-        state, metrics = train_model(state, cifar_update_fn, cifar_config, rng=rng)
+        state, metrics = train_model(
+            state, cifar_update_fn, cifar_config, rng=rng)
         test_loss, test_accuracy = eval_model(
             state,
             cifar_eval_fn,
@@ -289,7 +306,8 @@ def bench_imdb(
     )
 
     vectorizer = CountVectorizer(max_features=10_000)
-    imdb_train["text"] = one_hot_encode(vectorizer, imdb_train["text"], train=True)
+    imdb_train["text"] = one_hot_encode(
+        vectorizer, imdb_train["text"], train=True)
     imdb_test["text"] = one_hot_encode(vectorizer, imdb_test["text"])
 
     model = IMDBClassifier()
@@ -306,7 +324,8 @@ def bench_imdb(
             apply_fn=model.apply, params=params, tx=optimizer
         )
 
-        state, metrics = train_model(state, imdb_update_fn, imdb_config, rng=rng)
+        state, metrics = train_model(
+            state, imdb_update_fn, imdb_config, rng=rng)
         test_loss, test_accuracy = eval_model(
             state,
             imdb_eval_fn,
@@ -356,6 +375,13 @@ if __name__ == "__main__":
     args = _parse_arguments()
     rng = jax.random.key(42)
 
+    muon_adam = optax.partition(
+        optimizers={
+            '2d_params': muon(0.001),
+            'non_2d_params': adam(0.001)
+        },
+        param_labels=label_2d
+    )
     optimizers = [
         ("SGD", sgd(0.001)),
         ("SGD_Momentum", sgd_momentum(0.01, 0.9)),
@@ -363,6 +389,7 @@ if __name__ == "__main__":
         ("Adagrad", adagrad(0.001)),
         ("RMSProp", rmsprop(0.001)),
         ("Adam", adam(0.001)),
+        ("Muon w/ Adam", muon_adam)
     ]
 
     if args.all or args.mnist:
