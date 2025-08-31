@@ -376,7 +376,7 @@ if __name__ == "__main__":
     rng = jax.random.key(42)
 
     muon_adam = optax.partition(
-        optimizers={
+        transforms={
             '2d_params': muon(0.001),
             'non_2d_params': adam(0.001)
         },

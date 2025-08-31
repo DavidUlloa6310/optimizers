@@ -1,3 +1,5 @@
+from typing import Callable
+
 import jax.numpy as jnp
 import jax
 import optax
@@ -22,7 +24,7 @@ def _newtonshulz5(G: jnp.ndarray, steps: int = 5, eps: float = 1e-7) -> jnp.ndar
     return X
 
 
-def tree_filter(tree: jnp.ndarray, pred: callable[[jnp.ndarray], bool]) -> jnp.ndarray:
+def tree_filter(tree: jnp.ndarray, pred: Callable[[jnp.ndarray], bool]) -> jnp.ndarray:
     return jax.tree.map(lambda x: x if pred(x) else None, tree)
 
 
