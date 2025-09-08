@@ -21,6 +21,7 @@ dependencies = [
     "tensorflow",
     "tqdm",
     "scikit-learn",
+    'jax[tpu] ; platform_machine == "tpu"',
 ]
 
 [project.urls]
