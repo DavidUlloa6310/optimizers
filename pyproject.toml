@@ -11,26 +11,28 @@ authors = [
 description = "A simple package for optimization algorithms"
 readme = "README.md"
 requires-python = ">=3.9"
+# Core dependencies (JAX is now optional)
 dependencies = [
     "numpy",
     "matplotlib",
     "optax",
-    "jax",
     "flax",
     "tensorflow-datasets",
     "tensorflow",
     "tqdm",
     "scikit-learn",
-    'jax[tpu] ; platform_machine == "tpu"',
 ]
 
 [project.urls]
 Homepage = "https://github.com/davidulloa6310/optimizers"
 
-[tool.setuptools.packages]
-find = {}
-
-[dependency-groups]
+[project.optional-dependencies]
+tpu = [
+    "jax[tpu]"
+]
 dev = [
     "ruff>=0.12.10",
 ]
+
+[tool.setuptools.packages]
+find = {}

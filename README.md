@@ -7,16 +7,16 @@ This repository provides implementations of common optimization algorithms used 
 
 ## Installation
 
-Install the package directly from the repository:
+Install the package directly from the repository, if on TPU:
 
 ```bash
-pip install -e .
+pip install -e .[tpu]
 ```
 
-Or install with all dependencies:
+or with developer packages:
+
 ```bash
-pip install -r requirements.txt
-pip install -e .
+pip install -e .[tpu, dev] # installing both - but can just do [dev] if needs be
 ```
 
 ## Implemented Optimizers
