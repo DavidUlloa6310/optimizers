@@ -32,6 +32,8 @@ The package currently implements the following optimization algorithms:
 
 ## Benchmarking
 
+For a write-up of the results so far, see [REPORT.md](REPORT.md).
+
 The package includes benchmarking functionality for evaluating optimizer performance on standard datasets:
 
 **Supported Datasets**
