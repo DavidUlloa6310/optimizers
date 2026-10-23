@@ -34,6 +34,17 @@ w_{t+1} = w_t + v_{t+1}
 \end{align*}
 $$
 
+Computing $g(w_t + \rho v_t)$ needs a second forward pass, so in practice (and in `nesterov_sgd.py`) we use the equivalent reformulation from Sutskever et al., which only needs $g(w_t)$:
+
+$$
+\begin{align*}
+v_{t+1} = \rho v_t + g(w_t) \\
+w_{t+1} = w_t - \eta (g(w_t) + \rho v_{t+1})
+\end{align*}
+$$
+
+The key detail is that the step uses the new velocity $v_{t+1}$. Using $v_t$ instead gives $w_{t+1} = w_t - \eta v_{t+1}$, which is plain momentum.
+
 ## AdaGrad
 
 AdaGrad takes an interesting approach by keep a per-parameter sum of the gradients and updates each accordingly. You might notice the $\sqrt{v_{t_1}}$ is oddly similar to an L2 norm.
