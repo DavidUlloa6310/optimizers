@@ -150,10 +150,11 @@ def imdb_update_fn(state, batch, rng):
 
 @jax.jit
 def imdb_eval_fn(state, x, y):
-    logits = state.apply_fn(state.params, x, training=False)
+    # Squeeze so (batch, 1) logits don't broadcast against (batch,) labels
+    logits = jnp.squeeze(state.apply_fn(state.params, x, training=False), axis=-1)
     loss = jnp.mean(optax.sigmoid_binary_cross_entropy(logits, y))
     probs = jax.nn.sigmoid(logits)
 
     preds = (probs > 0.5).astype(jnp.int32)
-    accuracy = jnp.mean(preds[:, 0] == y)
+    accuracy = jnp.mean(preds == y)
     return loss, accuracy
