@@ -1,24 +1,26 @@
 # Optimizer Benchmark Report
 
-This report collects the results and analysis produced so far in this repository: six optimizers implemented from scratch in JAX, each trained on three classic benchmarks taken from the Adam paper (Kingma & Ba, 2014). It covers what was run, what the training curves show, and the caveats a reader should keep in mind before drawing conclusions.
+This report compares eight optimizers, all implemented from scratch in JAX, on three classic benchmarks from the Adam paper (Kingma & Ba, 2014). It covers what was run, what the results show, and the caveats to keep in mind before drawing conclusions.
 
-The derivations behind each optimizer live in [`optim/optimizers/README.md`](optim/optimizers/README.md). This document is about how they behaved.
+The derivations behind each optimizer are in [`optim/optimizers/README.md`](optim/optimizers/README.md). This document is about how the optimizers behaved.
+
+**Data status.** MNIST and IMDB were re-run in October 2026 for all eight optimizers. That run includes the Nesterov fix (#3), Shampoo, and saved test metrics. CIFAR-10 could not be re-run yet because its download host is blocked in the cloud environment used for these runs. The CIFAR-10 section therefore still describes the older April 2025 run, which has no test numbers, no Muon or Shampoo, and the pre-fix Nesterov.
 
 ## TL;DR
 
-- **Adam was the most reliable optimizer overall.** It converged quickly on all three tasks with a low, stable gradient norm, and it reached the lowest training loss on IMDB.
-- **SGD with momentum matched or beat Adam on the CIFAR-10 CNN**, ending with the lowest training loss of any optimizer there. Its learning rate (0.01) was also 10x higher than the adaptive methods' (0.001), so this is partly a learning-rate comparison.
-- **Plain SGD at lr = 0.001 was the slowest everywhere.** It was still visibly improving at the end of every run, and on CIFAR-10 its gradient norm grew rather than shrank.
-- **RMSProp learned fastest early but became unstable late in training.** On CIFAR-10 its loss spiked and its gradient norm climbed past 40 to 80; on IMDB the spread of its per-batch loss widened over time.
-- **AdaGrad was stable but slow on harder problems.** Its accumulating denominator shrinks the effective step size, which shows up as a long, slow tail on CIFAR-10 and IMDB.
-- **"Nesterov SGD" produced curves identical to SGD with momentum.** This was an implementation bug rather than a finding. It has since been fixed (#3), but the Nesterov results below predate the fix; see [Known issues](#known-issues).
-- **Muon (with Adam for non-2D parameters) is implemented but has not been benchmarked yet.** No results for it exist in the repo.
+- **On MNIST, six of the eight optimizers tie at about 92.4% test accuracy.** The model is linear, so this is the ceiling, and the optimizers differ only in how fast they reach it. Adam gets there fastest (3 epochs to 92% train accuracy) but ends slightly lower on test (91.7%). Plain SGD at lr = 0.001 is the only clear loser (90.2%).
+- **On IMDB, the optimizers that fit the training set fastest generalized worst.** Adam and RMSProp reach the lowest training loss within about 10 epochs but finish with the lowest test accuracy (87.0% and 86.4%). Shampoo (88.8%) and Muon (88.7%) fit the slowest and score best, which looks like a form of implicit regularization. Over 180 epochs with no early stopping, a slow optimizer overfits less.
+- **RMSProp is the least stable.** On IMDB its training loss starts rising again after about epoch 58, and it has the worst test loss (0.413). In the older CIFAR-10 run its loss and gradient norm spiked late in training.
+- **SGD with momentum is a strong, cheap baseline.** It is within 0.1 points of the best on MNIST, has the best IMDB test loss (0.315), and had the lowest training loss in the old CIFAR-10 run.
+- **With the bug fixed, Nesterov now behaves differently from momentum.** It is slightly faster and smoother (IMDB epoch-180 training loss 0.269 vs 0.280), with test results within noise of momentum.
+- **Second-order methods are much slower on CPU.** On MNIST, Muon took 1,600 s and Shampoo took 3,272 s, compared with 64 to 101 s for the rest, and neither beat the simple methods there.
+- **All differences under about 0.5 points of test accuracy come from a single seed.** They should be read as ties.
 
 ## Setup
 
 ### Optimizers
 
-All optimizers are written by hand as `optax.GradientTransformation`s in [`optim/optimizers/`](optim/optimizers/). Hyperparameters are the ones hard-coded in [`optim/benchmarks/bench.py`](optim/benchmarks/bench.py).
+All optimizers are hand-written `optax.GradientTransformation`s in [`optim/optimizers/`](optim/optimizers/). The hyperparameters are the ones hard-coded in [`optim/benchmarks/bench.py`](optim/benchmarks/bench.py). No learning-rate schedules, weight decay, or gradient clipping are used.
 
 | Optimizer | File | Learning rate | Other hyperparameters |
 |---|---|---|---|
@@ -28,78 +30,103 @@ All optimizers are written by hand as `optax.GradientTransformation`s in [`optim
 | AdaGrad | `adagrad.py` | 0.001 | ε = 1e-9 |
 | RMSProp | `rmsprop.py` | 0.001 | β = 0.9, ε = 1e-9 |
 | Adam | `adam.py` | 0.001 | β₁ = 0.9, β₂ = 0.999, ε = 1e-9 |
-| Muon + Adam *(not yet benchmarked)* | `muon.py` | 0.001 (both) | momentum = 0.95, 5 Newton–Schulz steps in bfloat16; Adam on non-2D params |
-
-No learning-rate schedules, weight decay, or gradient clipping are used.
+| Muon + Adam | `muon.py` | 0.001 (both) | Muon on 2D weights (momentum 0.95, 5 Newton–Schulz steps in bfloat16); Adam on everything else |
+| Shampoo | `shampoo.py` (#4) | 0.03 | ε = 1e-4; inverse roots recomputed every 10 steps; any dimension over 2,048 falls back to a diagonal statistic |
 
 ### Datasets and models
 
-The three tasks mirror the experiments in the Adam paper ([`models.py`](optim/benchmarks/models.py), [`datasets.py`](optim/benchmarks/datasets.py)).
+The three tasks mirror the Adam paper's experiments ([`models.py`](optim/benchmarks/models.py), [`datasets.py`](optim/benchmarks/datasets.py)). Every run uses batch size 128 and seed 42.
 
-| Task | Data | Model | Epochs | Batch size | Steps per run |
-|---|---|---|---|---|---|
-| MNIST | 60k train / 10k test, pixels scaled to [0, 1], flattened to 784 | Two stacked dense layers (784 → 784 → 10) with no activation, so a linear classifier | 40 | 128 | 18,760 |
-| CIFAR-10 | 50k / 10k, ZCA-whitened using training-set statistics | CNN: 3 conv layers (32, 64, 128 filters, 5×5, 3×3/2 max-pool, ReLU) → dense 1000 → 10, dropout 0.2 on input and FC layer | 40 | 128 | 15,640 |
-| IMDB | 25k / 25k reviews, 10,000-word bag-of-words (`CountVectorizer`) | Single dense layer to 1 logit with 50% input dropout (logistic regression) | 180 | 128 | 35,280 |
+| Task | Data | Model | Epochs | Steps per run |
+|---|---|---|---|---|
+| MNIST | 60k train / 10k test, pixels in [0, 1], flattened to 784 | Two dense layers (784 → 784 → 10) with no activation, so a linear classifier | 40 | 18,760 |
+| CIFAR-10 | 50k / 10k, ZCA-whitened with training-set statistics | CNN with 3 conv layers (32/64/128 filters, 5×5, 3×3 stride-2 max-pool, ReLU), then dense 1000 → 10, with dropout 0.2 on the input and the FC layer | 40 | 15,640 |
+| IMDB | 25k / 25k reviews, 10,000-word bag-of-words | One dense layer to a single logit with 50% input dropout (logistic regression) | 180 | 35,280 |
 
-Each run starts from a fixed seed (`jax.random.key(42)`). On IMDB every optimizer starts from the same initial parameters.
+### How the numbers were produced
 
-### Metrics
+- **MNIST and IMDB.** Commit `1302297` on branch `claude/project-thread-lzqwms` (#4). That is `main` with the Nesterov fix, plus Shampoo, per-run timing, saved test metrics and raw per-batch metrics, and a fix for the IMDB test-loss calculation. It ran on a 4-core CPU, so the train times are CPU times.
+- **CIFAR-10.** Commit `4ec9c66` (April 2025). The plots from that run are linked below. Its optimizer, model, and data code matches today's apart from the Nesterov fix.
 
-For every batch, the training loop records the training loss, the training accuracy (with dropout active), and the global L2 norm of the gradient. Test loss and accuracy are computed once at the end of training and printed to stdout.
+Each step records the training loss, the training accuracy (measured with dropout active), and the gradient's global L2 norm. Test loss and accuracy are computed once, after the final epoch. In the tables, "train loss" is the mean over the final epoch.
 
 ## Results
 
-The plots below were generated by the original benchmarking code (commit [`4ec9c66`](https://github.com/DavidUlloa6310/optimizers/commit/4ec9c66)) and were later removed from the working tree when plotting switched to one combined figure per dataset. They are linked from that commit. The optimizer implementations, models, and data pipeline have not changed in behavior since then (later commits are formatting and API renames), so these plots still describe the current code for the six original optimizers.
-
-The plots show raw, unsmoothed per-batch values, so the thick bands are batch-to-batch noise. Values quoted below are read off the plots and are approximate. **Final test-set numbers were printed but never saved**, so this report can only compare training curves.
-
 ### MNIST (linear classifier)
 
-| Optimizer | Converges by | Final train loss (per-batch range) | Final train accuracy (range) | Gradient norm trend |
-|---|---|---|---|---|
-| SGD | ~5,000 steps, still drifting down | 0.25 – 0.6 | 0.82 – 0.95 | Falls from ~2.2 to 0.5 – 1.0 |
-| SGD + Momentum | a few hundred steps | 0.12 – 0.5 | 0.86 – 0.98 | Flat around 0.5 – 1.0 |
-| SGD + Nesterov | same as momentum | 0.12 – 0.5 | 0.86 – 0.98 | Same as momentum |
-| AdaGrad | a few hundred steps | 0.12 – 0.45 | 0.85 – 0.98 | Lowest of all, 0.35 – 0.85 |
-| RMSProp | under 200 steps | 0.1 – 0.5 | 0.87 – 0.98 | Slowly rises from ~0.75 to ~1.0, peaks ~1.5 |
-| Adam | under 200 steps | 0.1 – 0.45 | 0.85 – 0.98 | 0.4 – 1.2, roughly flat |
+![MNIST results](report/figures/mnist.png)
 
-**Takeaways.** Every optimizer except plain SGD reaches the same plateau almost immediately. That plateau is the capacity of a linear model on MNIST, so this task mostly measures speed of convergence, not final quality. Plain SGD at lr = 0.001 needs about 25 times as many steps to get close. RMSProp's gradient norm drifting upward suggests its step size stays large near the minimum, because its moving-average denominator doesn't keep shrinking the way AdaGrad's does.
+| Optimizer | Test acc. | Test loss | Train loss (final epoch) | Epochs to 92% train acc. | Train time |
+|---|---|---|---|---|---|
+| AdaGrad | **92.48%** | **0.267** | 0.260 | 10 | 93 s |
+| SGD + Nesterov | 92.43% | 0.277 | 0.245 | 4 | 71 s |
+| RMSProp | 92.39% | 0.306 | 0.249 | 5 | 97 s |
+| Muon + Adam | 92.38% | 0.270 | 0.246 | 9 | 1,600 s |
+| SGD + Momentum | 92.37% | 0.276 | 0.246 | 5 | 71 s |
+| Shampoo | 91.96% | 0.278 | 0.273 | 23 | 3,272 s |
+| Adam | 91.73% | 0.324 | **0.236** | **3** | 101 s |
+| SGD | 90.20% | 0.357 | 0.376 | never | 64 s |
 
-The regular spikes in every gradient-norm plot repeat roughly every 469 steps, which is exactly one epoch (60,000 / 128). The training set is shuffled once and then visited in the same order every epoch, so the same "hard" batches reappear at the same point each time.
+**Takeaways**
 
-<details>
-<summary>MNIST training curves (6 plots)</summary>
+- The model is linear, so the test-accuracy ceiling is about 92.5%. Five optimizers land within 0.1 points of it, which is a tie.
+- What separates the optimizers here is speed. Adam reaches 92% train accuracy in 3 epochs, Nesterov in 4, and momentum and RMSProp in 5. AdaGrad needs 10 epochs, Muon 9, and Shampoo 23.
+- Adam has the lowest training loss but the second-worst test loss (0.324). It is overfitting a little, even on a linear model. RMSProp shows the same pattern (0.306).
+- Muon starts slowly, with a first-epoch loss of 1.43 compared with about 0.4 for the adaptive methods. Its orthogonalized update has a fixed overall size, and at lr = 0.001 that is small for the 784×784 layer. It catches up by about epoch 6.
+- Shampoo's lr of 0.03 was picked from a short sweep on this dataset (0.1 diverged). It still ends with the second-highest training loss, so it is probably under-tuned. It is also by far the slowest here, because its eigendecompositions run on CPU.
+- Plain SGD is the only optimizer that hasn't converged after 40 epochs. Its 10x smaller learning rate compared with momentum explains most of that gap.
 
-![MNIST SGD](https://github.com/DavidUlloa6310/optimizers/raw/4ec9c66/results/MNIST_Logistic_Regression_SGD.png)
-![MNIST SGD Momentum](https://github.com/DavidUlloa6310/optimizers/raw/4ec9c66/results/MNIST_Logistic_Regression_SGD_Momentum.png)
-![MNIST Nesterov SGD](https://github.com/DavidUlloa6310/optimizers/raw/4ec9c66/results/MNIST_Logistic_Regression_Nesterov_SGD.png)
-![MNIST AdaGrad](https://github.com/DavidUlloa6310/optimizers/raw/4ec9c66/results/MNIST_Logistic_Regression_Adagrad.png)
-![MNIST RMSProp](https://github.com/DavidUlloa6310/optimizers/raw/4ec9c66/results/MNIST_Logistic_Regression_RMSProp.png)
-![MNIST Adam](https://github.com/DavidUlloa6310/optimizers/raw/4ec9c66/results/MNIST_Logistic_Regression_Adam.png)
+### IMDB (bag-of-words logistic regression)
 
-</details>
+![IMDB results](report/figures/imdb.png)
 
-### CIFAR-10 (CNN)
+| Optimizer | Test acc. | Test loss | Train loss (final epoch) | Epochs to 88% train acc.* | Train time |
+|---|---|---|---|---|---|
+| Shampoo | **88.83%** | 0.340 | 0.348 | never | 581 s |
+| Muon + Adam | 88.66% | 0.332 | 0.352 | never | 620 s |
+| AdaGrad | 88.17% | 0.392 | 0.388 | never | 589 s |
+| SGD + Momentum | 87.74% | **0.315** | 0.280 | 69 | 688 s |
+| SGD + Nesterov | 87.61% | 0.315 | 0.269 | 62 | 574 s |
+| SGD | 87.10% | 0.388 | 0.413 | never | 591 s |
+| Adam | 87.01% | 0.339 | **0.245** | **8** | 592 s |
+| RMSProp | 86.37% | 0.413 | 0.299 | 10 | 582 s |
 
-| Optimizer | Final train loss (range) | Final train accuracy (range) | Gradient norm trend | Notes |
+\* Training accuracy is measured with 50% input dropout, so it is lower than the model's real training-set accuracy and sometimes lower than its test accuracy.
+
+**Takeaways**
+
+- **Fitting speed and test accuracy are inversely ordered.** Adam and RMSProp reach the lowest training loss within about 10 epochs and then train for 170 more with nothing to stop them, which leaves them with the lowest test accuracy. Shampoo, Muon, and AdaGrad never get their training loss below about 0.35 and generalize best. With early stopping or a tuned epoch count, the ranking would likely change. As it stands, the comparison mostly measures how much each optimizer overfits in 180 epochs.
+- **Muon and Shampoo both behave like damped methods on this model.** The model's only weight matrix is 10,000 × 1, which has these effects:
+  - **Muon:** orthogonalizing a single column just normalizes it. Every Muon step therefore has a fixed norm of about lr, about 100 times smaller than Adam's step at the same lr.
+  - **Shampoo:** the 10,000 dimension exceeds its 2,048 limit, so it falls back to a diagonal, AdaGrad-like statistic.
+- **RMSProp is unstable.** Its training loss bottoms out near epoch 58 and then drifts back up, from about 0.27 to 0.30. It also has the worst test loss (0.413). With no momentum or bias correction and a fixed lr, it keeps bouncing around the minimum.
+- **Nesterov edges out momentum on training loss** (0.269 vs 0.280) and has a smoother curve. Their test results are tied.
+- Training times are all similar, about 10 minutes, because the model is so small that per-step overhead dominates.
+
+### CIFAR-10 (CNN), older run
+
+> These results are from the April 2025 run. That run has no test metrics and no Muon or Shampoo, and its "Nesterov" was identical to momentum. All values are read off the plots and are approximate.
+
+| Optimizer | Train loss at end (per-batch range) | Train acc. at end (range) | Gradient norm | Notes |
 |---|---|---|---|---|
 | SGD | 1.0 – 1.4 | 0.5 – 0.7 | Grows from ~5 to 5 – 25 | Still improving at the end, far from converged |
 | SGD + Momentum | 0.1 – 0.35 | 0.88 – 0.98 | Steady at 2 – 6 | Lowest final loss |
-| SGD + Nesterov | 0.15 – 0.5 | 0.82 – 0.97 | Steady at 2 – 7 | Same algorithm as momentum (see below); differences are dropout noise |
-| AdaGrad | 0.7 – 1.1 | 0.6 – 0.8 | 5 – 20 | Initial loss spike to ~5.8, then slow |
-| RMSProp | 0.4 – 1.5, with spikes | 0.7 – 0.9 | Rises late, spikes to 40 – 80 | Fastest early (~0.8 accuracy by step 4,000), then plateaus and destabilizes |
-| Adam | 0.15 – 0.45 | 0.85 – 0.96 | Steady at 2 – 6 | Initial loss spike to ~9, then smooth |
+| SGD + Nesterov (pre-fix) | 0.15 – 0.5 | 0.82 – 0.97 | Steady at 2 – 7 | Same algorithm as momentum in this run; differences are dropout noise |
+| AdaGrad | 0.7 – 1.1 | 0.6 – 0.8 | 5 – 20 | Loss spikes to ~5.8 at the start, then slow progress |
+| RMSProp | 0.4 – 1.5, with spikes | 0.7 – 0.9 | Rises late, with spikes to 40 – 80 | Fastest early (~0.8 accuracy by step 4,000), then plateaus and destabilizes |
+| Adam | 0.15 – 0.45 | 0.85 – 0.96 | Steady at 2 – 6 | Loss spikes to ~9 at the start, then smooth |
 
-**Takeaways.** This is the only task with a non-convex model and it separates the optimizers most clearly. Momentum SGD and Adam are the two that both converge and stay stable. RMSProp gets ahead early but, with no learning-rate decay and no bias correction or momentum, it starts to oscillate in the second half of training: loss spikes coincide with gradient-norm spikes. AdaGrad's ever-growing denominator makes it too conservative to finish in 40 epochs. Plain SGD at 0.001 is simply too slow, and its rising gradient norm shows it is still leaving the flat region near initialization.
+**Takeaways**
 
-All three adaptive methods show a large loss spike in the first few steps (to ~6, ~16, and ~9 for AdaGrad, RMSProp, and Adam). On the first step their per-parameter normalization makes every update at least lr in size regardless of gradient magnitude (about 3·lr for RMSProp, since its average starts at 0.1·g²), which is a large jolt for parameters whose gradients are tiny.
-
-Training accuracies above 0.9 for this small CNN almost certainly overfit. Without the saved test accuracy, we can't say which optimizer generalized best.
+- This is the only non-convex model, and it separates the optimizers most clearly.
+- Momentum SGD and Adam are the two optimizers that both converge and stay stable.
+- RMSProp's late instability matches what the new IMDB run shows.
+- AdaGrad's ever-growing denominator makes it too conservative to finish in 40 epochs.
+- All three adaptive methods spike in loss in the first few steps. Their per-parameter normalization makes the first update at least lr in size for every parameter, however small its gradient.
+- Training accuracies above 0.9 for this small CNN almost certainly mean it is overfitting. Without test numbers, the run can't say which optimizer generalizes best.
 
 <details>
-<summary>CIFAR-10 training curves (6 plots)</summary>
+<summary>CIFAR-10 training curves from the April 2025 run (6 plots)</summary>
 
 ![CIFAR-10 SGD](https://github.com/DavidUlloa6310/optimizers/raw/4ec9c66/results/Cifar_SGD.png)
 ![CIFAR-10 SGD Momentum](https://github.com/DavidUlloa6310/optimizers/raw/4ec9c66/results/Cifar_SGD_Momentum.png)
@@ -110,74 +137,53 @@ Training accuracies above 0.9 for this small CNN almost certainly overfit. Witho
 
 </details>
 
-### IMDB (bag-of-words logistic regression)
-
-| Optimizer | Final train loss (range) | Final train accuracy (range) | Gradient norm trend | Notes |
-|---|---|---|---|---|
-| SGD | 0.32 – 0.5 | 0.75 – 0.92 | Slowly falls, 0.7 – 3 | Still decreasing after 180 epochs |
-| SGD + Momentum | 0.15 – 0.45 | 0.8 – 0.95 | 0.5 – 4, spiky | Converges within ~1,000 steps |
-| SGD + Nesterov | 0.15 – 0.45 | 0.8 – 0.95 | 0.5 – 4, spiky | **Pixel-identical to momentum** |
-| AdaGrad | 0.3 – 0.46 | 0.77 – 0.93 | Slowly falls, 0.6 – 2.5 | Similar pace to SGD here |
-| RMSProp | 0.1 – 0.6, upper band widening | 0.82 – 0.97 | 0.3 – 2.5 | Fast start, then loss variance grows over training |
-| Adam | 0.1 – 0.38 | 0.83 – 0.97 | 0.4 – 2 | Lowest and tightest loss band |
-
-**Takeaways.** IMDB is convex like MNIST, but the input is very high dimensional and sparse, which is the setting the Adam paper used to motivate adaptive methods. Adam does best here, consistent with the paper. AdaGrad, which should also suit sparse features, is held back by its learning rate of 0.001 combined with the accumulator; over 35k steps its effective step size becomes very small. RMSProp's loss band keeps widening from roughly step 15,000 onward even though accuracy stays flat. That is consistent with growing confidence on some examples (overfitting) or step-size oscillation, and the two can't be distinguished without test curves.
-
-<details>
-<summary>IMDB training curves (6 plots)</summary>
-
-![IMDB SGD](https://github.com/DavidUlloa6310/optimizers/raw/4ec9c66/results/IMDB_SGD.png)
-![IMDB SGD Momentum](https://github.com/DavidUlloa6310/optimizers/raw/4ec9c66/results/IMDB_SGD_Momentum.png)
-![IMDB Nesterov SGD](https://github.com/DavidUlloa6310/optimizers/raw/4ec9c66/results/IMDB_Nesterov_SGD.png)
-![IMDB AdaGrad](https://github.com/DavidUlloa6310/optimizers/raw/4ec9c66/results/IMDB_Adagrad.png)
-![IMDB RMSProp](https://github.com/DavidUlloa6310/optimizers/raw/4ec9c66/results/IMDB_RMSProp.png)
-![IMDB Adam](https://github.com/DavidUlloa6310/optimizers/raw/4ec9c66/results/IMDB_Adam.png)
-
-</details>
-
 ## Cross-task comparison
 
-Rough ranking by training behavior, from the plots above (1 = best):
-
-| Optimizer | MNIST | CIFAR-10 | IMDB | Overall notes |
+| Optimizer | MNIST | IMDB | CIFAR-10 (old run) | In one line |
 |---|---|---|---|---|
-| Adam | 1 (tie) | 2 | 1 | Best default: fast, stable, no tuning needed at lr = 0.001 |
-| SGD + Momentum | 1 (tie) | 1 | 2 | Excellent at lr = 0.01; the 10x higher learning rate is part of why |
-| RMSProp | 1 (tie) | 4 | 3 | Fastest start, but unstable late without a schedule |
-| AdaGrad | 1 (tie) | 5 | 4 | Stable but its step size decays too far on long runs |
-| SGD | 6 | 6 | 5 | Too slow at lr = 0.001 on every task |
-| SGD + Nesterov | — | — | — | Was identical to momentum in these runs, so not ranked |
+| SGD + Momentum | Tied best | Best test loss | Best train loss | Strong, cheap default at lr = 0.01 |
+| SGD + Nesterov | Tied best | Tied with momentum | — (pre-fix) | Slightly smoother than momentum, otherwise the same |
+| Adam | Fastest, slight overfit | Fastest, overfits | Converged, stable | Fastest to fit; needs early stopping or regularization |
+| AdaGrad | Tied best | 3rd | Too slow | Stable, but its step size decays too far on harder problems |
+| RMSProp | Tied best | Worst | Unstable late | Fast start, unstable without a schedule |
+| Muon + Adam | Tied best, slow start | 2nd | — | Competitive, but 16× slower than Adam on CPU for MNIST; degenerate on 1-column weights |
+| Shampoo | Slightly behind | Best | — | Competitive, but 32× slower than Adam on CPU for MNIST; likely under-tuned |
+| SGD | Worst | Middle | Worst | Too slow at lr = 0.001 |
 
-## Known issues
+No optimizer wins everywhere. For a fixed budget with no tuning, SGD with momentum and Adam are the safest choices. The newer second-order methods don't pay for their cost on these small, mostly convex models. CIFAR-10 is the benchmark most likely to show their benefits, and it hasn't been run for them yet.
 
-These affect how far the results above can be trusted.
+## Known issues and caveats
 
-1. **Nesterov SGD was mathematically identical to classical momentum in these runs (fixed in #3).** The old `nesterov_sgd.py` stepped with `-lr * (ρ·v_old + g)` while setting the new velocity to `ρ·v_old + g`, so every step was just `-lr · v_new`. That is classical momentum with the learning rate folded in, and it explains why the IMDB curves are pixel-identical. The fix steps with `-lr * (ρ·v_new + g)`, which matches `optax.sgd(nesterov=True)` exactly. The Nesterov plots in this report come from the old code, so the benchmark needs to be re-run to get real Nesterov results.
-2. **No test metrics were saved.** `eval_model` prints test loss and accuracy but they aren't written to disk or plotted, so generalization can't be compared. Saving `BenchResult.test_loss`/`test_accuracy` to a CSV or JSON alongside the plots would fix this.
-3. **Learning rates are not tuned or matched.** SGD uses 0.001 while the momentum variants use 0.01, and every adaptive method uses 0.001. Some of the gaps above are learning-rate effects rather than algorithm effects. A small learning-rate sweep per optimizer would make the comparison fair.
-4. **Single seed, single run.** There are no error bars. Differences of a few points in the ranges above are within run-to-run noise.
-5. **Training accuracy is measured with dropout on.** On CIFAR-10 and IMDB the plotted accuracy understates the model's real training-set accuracy.
-6. **The training set isn't reshuffled between epochs.** This produces the periodic gradient-norm spikes seen on MNIST and makes every epoch see batches in the same order.
-7. **The MNIST model has an extra linear layer.** `MNISTRegression` is two dense layers with no activation, which is still a linear classifier but is over-parameterized compared with the paper's single-layer logistic regression.
-
-## Not yet benchmarked
-
-**Muon** ([`muon.py`](optim/optimizers/muon.py)) was added after these runs. It orthogonalizes the momentum of each 2D weight matrix with five Newton–Schulz iterations and is paired with Adam for biases and other non-2D parameters via `optax.partition`. It is wired into `bench.py` as `"Muon w/ Adam"`, but no results for it have been generated or committed yet. Rerunning the benchmark will produce the first Muon numbers alongside fresh baselines.
+1. **CIFAR-10 is stale.** It needs a re-run with all eight optimizers wherever `www.cs.toronto.edu` is reachable, for example in Colab or on a local machine: `python -m optim.benchmarks.bench --graph-directory results --cifar`.
+2. **Learning rates are not tuned or matched.** SGD uses 0.001, the momentum variants 0.01, the adaptive methods 0.001, and Shampoo 0.03. Several of the gaps above, especially SGD vs momentum and Muon's slow start, are learning-rate effects. A small per-optimizer sweep would make the comparison fair.
+3. **Single seed with no error bars.** The top MNIST results are separated by less than the seed-to-seed noise you'd expect.
+4. **No early stopping or validation split.** On IMDB, the 180-epoch budget turns the comparison into a test of how much each optimizer overfits.
+5. **Training accuracy is measured with dropout on,** so on IMDB and CIFAR-10 it understates real training-set accuracy.
+6. **The training set isn't reshuffled between epochs.** This produces periodic gradient-norm spikes once per epoch.
+7. **The MNIST model has an extra linear layer.** `MNISTRegression` is two dense layers with no activation. It is still a linear classifier, but it is over-parameterized compared with the paper's logistic regression, and it gives Muon and Shampoo a square 784×784 matrix to work on.
+8. **Fixed bugs that affect older numbers.**
+   - *Nesterov:* the old `nesterov_sgd.py` stepped with `-lr · (ρ·v_old + g)`, which is algebraically the same as classical momentum. It was fixed in #3 to use `v_new`, and now matches `optax.sgd(nesterov=True)` exactly.
+   - *IMDB test loss:* before #4, the IMDB test loss broadcast `(batch, 1)` logits against `(batch,)` labels, so it was meaningless. Test accuracy was unaffected.
 
 ## Reproducing
 
 ```bash
-pip install -e .[tpu]   # or pip install -e . on CPU/GPU with your own JAX install
+pip install -e .[tpu]   # or: pip install -e . with your own JAX install
 python -m optim.benchmarks.bench --graph-directory ./results --all
 ```
 
-The current `bench.py` writes one combined figure per dataset (`MNIST_results.png`, `Cifar_results.png`, `IMDB_results.png`) with all optimizers overlaid and a 40-step moving-average smoothing, rather than the per-optimizer plots shown above.
+With #4, each dataset writes `<dataset>_results.png` (all optimizers overlaid), `<dataset>_results.md` (test metrics and train time), and `<dataset>_metrics.npz` (raw per-batch loss, accuracy, and gradient norm). The figures in this report were drawn from those files with [`report/plot_results.py`](report/plot_results.py), for example:
+
+```bash
+python report/plot_results.py results/MNIST_metrics.npz results/MNIST_results.md 469 "MNIST (linear classifier), 40 epochs" report/figures/mnist.png 0.2 0.6
+```
 
 ## References
 
 - Kingma, D. P., & Ba, J. (2014). Adam: A method for stochastic optimization. arXiv:1412.6980.
 - Duchi, J., Hazan, E., & Singer, Y. (2011). Adaptive subgradient methods for online learning and stochastic optimization. JMLR, 12(7).
-- Tieleman, T., & Hinton, G. (2012). Lecture 6.5 — RMSProp. COURSERA: Neural Networks for Machine Learning.
+- Tieleman, T., & Hinton, G. (2012). Lecture 6.5, RMSProp. COURSERA: Neural Networks for Machine Learning.
 - Sutskever, I., Martens, J., Dahl, G., & Hinton, G. (2013). On the importance of initialization and momentum in deep learning. ICML.
 - Nesterov, Y. (1983). A method for unconstrained convex minimization problem with the rate of convergence O(1/k²). Doklady ANSSSR, 269.
+- Gupta, V., Koren, T., & Singer, Y. (2018). Shampoo: Preconditioned stochastic tensor optimization. ICML.
 - Jordan, K. et al. (2024). Muon: An optimizer for hidden layers in neural networks. https://kellerjordan.github.io/posts/muon/
