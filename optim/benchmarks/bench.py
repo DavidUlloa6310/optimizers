@@ -1,6 +1,7 @@
 import argparse
 import math
 import os
+import time
 from dataclasses import dataclass, field
 
 import jax
@@ -30,6 +31,7 @@ from optim.optimizers.nesterov_sgd import sgd_nesterov
 from optim.optimizers.rmsprop import rmsprop
 from optim.optimizers.sgd import sgd, sgd_momentum
 from optim.optimizers.muon import muon, label_2d
+from optim.optimizers.shampoo import shampoo
 
 
 @dataclass
@@ -54,6 +56,7 @@ class Metrics:
     loss: list = field(default_factory=list)
     accuracy: list = field(default_factory=list)
     grad_norm: list = field(default_factory=list)
+    train_seconds: float = 0.0
 
 
 @dataclass
@@ -136,9 +139,35 @@ def graph_dataset_benches(results: list[BenchResult], dataset: str, path: str):
     plt.savefig(os.path.join(path, f"{dataset}_results.png"))
 
 
+def save_dataset_results(results: list[BenchResult], dataset: str, path: str):
+    lines = [
+        f"# Test results ({dataset})",
+        "",
+        "| Optimizer | Final train loss | Test loss | Test accuracy | Train time (s) |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for result in results:
+        lines.append(
+            f"| {result.optimizer} | {float(result.metrics.loss[-1]):.4f} "
+            f"| {float(result.test_loss):.4f} "
+            f"| {float(result.test_accuracy):.4f} | {result.metrics.train_seconds:.0f} |"
+        )
+    with open(os.path.join(path, f"{dataset}_results.md"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+    # Raw per-batch training metrics, keyed by "<optimizer>/<metric>"
+    raw = {}
+    for result in results:
+        raw[f"{result.optimizer}/loss"] = np.array(result.metrics.loss)
+        raw[f"{result.optimizer}/accuracy"] = np.array(result.metrics.accuracy)
+        raw[f"{result.optimizer}/grad_norm"] = np.array(result.metrics.grad_norm)
+    np.savez(os.path.join(path, f"{dataset}_metrics.npz"), **raw)
+
+
 def train_model(state, update_fn, config, rng):
     metrics = Metrics()
     batches = math.ceil(len(config.data) / config.batch_size)
+    start = time.perf_counter()
     for epoch in tqdm(range(config.epochs)):
         loss, accuracy = 0, 0
         get_batch = _batch_iterator(
@@ -158,6 +187,7 @@ def train_model(state, update_fn, config, rng):
         accuracy /= batches
         print(
             f"Epoch {epoch + 1}: Loss: {loss:.4f}, Train Accuracy: {accuracy:.4f}")
+    metrics.train_seconds = time.perf_counter() - start
     return state, metrics
 
 
@@ -389,17 +419,21 @@ if __name__ == "__main__":
         ("Adagrad", adagrad(0.001)),
         ("RMSProp", rmsprop(0.001)),
         ("Adam", adam(0.001)),
-        ("Muon w/ Adam", muon_adam)
+        ("Muon w/ Adam", muon_adam),
+        ("Shampoo", shampoo(0.03)),
     ]
 
     if args.all or args.mnist:
         mnist_results = bench_mnist(*optimizers)
         graph_dataset_benches(mnist_results, "MNIST", args.graph_directory)
+        save_dataset_results(mnist_results, "MNIST", args.graph_directory)
 
     if args.all or args.cifar:
         cifar_results = bench_cifar(*optimizers)
         graph_dataset_benches(cifar_results, "Cifar", args.graph_directory)
+        save_dataset_results(cifar_results, "Cifar", args.graph_directory)
 
     if args.all or args.imdb:
         imdb_results = bench_imdb(*optimizers)
         graph_dataset_benches(imdb_results, "IMDB", args.graph_directory)
+        save_dataset_results(imdb_results, "IMDB", args.graph_directory)

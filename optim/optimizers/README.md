@@ -86,3 +86,24 @@ w_{t+1} = \frac{\eta}{\epsilon + \sqrt{\hat{v_{t+1}}}} * \hat{m_{t+1}}
 $$
 
 As you might notice, we also have $B_1^{t+1}$ anad $B_2^{t+1}$. These are meant to scale $m_{t+1}$ and $v_{t+1}$, where the more time steps pass, the smaller each of these beta values become. Initially, $m_{t+1}$ and $v_{t+1}$ are larger because of this and become slower over time.
+
+## Shampoo
+
+Every optimizer above (other than Muon) adapts each parameter on its own, which is the same as using a *diagonal* preconditioner. Full-matrix AdaGrad would instead keep the whole $n \times n$ matrix of gradient outer products, which is impossible for any real layer. Shampoo ([Gupta, Koren & Singer, 2018](https://arxiv.org/abs/1802.09568)) sits in between: for a weight matrix $W \in \mathbb{R}^{m \times n}$ it keeps one preconditioner per dimension.
+
+$$
+\begin{align*}
+L_{t+1} = L_t + G_t G_t^T \\
+R_{t+1} = R_t + G_t^T G_t \\
+w_{t+1} = w_t - \eta L_{t+1}^{-1/4} G_t R_{t+1}^{-1/4}
+\end{align*}
+$$
+
+$L$ is $m \times m$ and $R$ is $n \times n$, so the memory cost is $m^2 + n^2$ instead of $(mn)^2$, while still capturing correlations between rows and between columns. $L_0$ and $R_0$ start at $\epsilon I$.
+
+For a tensor of order $k$ (like a $5 \times 5 \times C_{in} \times C_{out}$ conv kernel) the same idea generalizes: each mode $i$ keeps $H_i \mathrel{+}= G_{(i)} G_{(i)}^T$, where $G_{(i)}$ flattens every other dimension, and the gradient is multiplied by $H_i^{-1/2k}$ along every mode. A bias vector ($k = 1$) is then just full-matrix AdaGrad.
+
+Two practical tweaks in our implementation:
+
+* The inverse roots need an eigendecomposition, which is by far the slowest part, so they are only recomputed every `update_every` steps (10 by default).
+* A dimension larger than `max_precond_dim` (2048) uses a diagonal statistic instead of a full matrix. Otherwise the $10{,}000 \times 1$ IMDB layer would need a $10{,}000 \times 10{,}000$ preconditioner.
