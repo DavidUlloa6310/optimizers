@@ -12,9 +12,10 @@ def sgd_nesterov(learning_rate, rho):
 
         # calculate v_{t+1}
         new_velocity = jax.tree.map(lambda v, g: rho * v + g, velocity, grads)
-        # actual step, considering v_{t+1} on our gradients
+        # actual step, looking ahead with v_{t+1} instead of v_t. Using v_t
+        # here would make this identical to classical momentum.
         updates = jax.tree.map(
-            lambda v, g: -learning_rate * (rho * v + g), velocity, grads
+            lambda v, g: -learning_rate * (rho * v + g), new_velocity, grads
         )
 
         return updates, {"velocity": new_velocity}
