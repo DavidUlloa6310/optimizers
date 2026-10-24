@@ -29,6 +29,8 @@ The package currently implements the following optimization algorithms:
 4. **AdaGrad**: Adapts learning rates based on parameter history
 5. **RMSProp**: Extends AdaGrad with exponential moving average
 6. **Adam**: Combines momentum and adaptive learning rates
+7. **Muon**: Orthogonalizes momentum for 2D weights with Newton-Schulz iterations (paired with Adam for other parameters)
+8. **Shampoo**: Preconditions each dimension of a weight tensor with its own matrix of gradient statistics
 
 ## Benchmarking
 
@@ -60,6 +62,10 @@ For each optimizer and dataset combination, the benchmarking tool generates plot
 * Accuracy curve
 * Gradient norm
 
+It also writes a `<dataset>_results.md` table with each optimizer's test loss, test accuracy and training time.
+
+If `ai.stanford.edu` is unreachable, the IMDB loader falls back to the Keras copy of the dataset on Google Cloud Storage.
+
 ## References
 
 The optimization algorithms implemented in this package are based on the following papers:
@@ -71,5 +77,7 @@ Duchi, J., Hazan, E., & Singer, Y. (2011). Adaptive subgradient methods for onli
 Tieleman, T., & Hinton, G. (2012). Lecture 6.5-rmsprop: Divide the gradient by a running average of its recent magnitude. COURSERA: Neural networks for machine learning, 4(2), 26-31.
 
 Sutskever, I., Martens, J., Dahl, G., & Hinton, G. (2013). On the importance of initialization and momentum in deep learning. In International conference on machine learning (pp. 1139-1147).
+
+Gupta, V., Koren, T., & Singer, Y. (2018). Shampoo: Preconditioned stochastic tensor optimization. In International Conference on Machine Learning (pp. 1842-1850).
 
 Nesterov, Y. (1983). A method for unconstrained convex minimization problem with the rate of convergence O(1/k^2). Doklady ANSSSR, 269, 543-547.

@@ -1,6 +1,12 @@
+import json
+import os
+import urllib.request
+
 import jax.numpy as jnp
 import numpy as np
 import tensorflow_datasets as tfds
+
+KERAS_DATASETS_URL = "https://storage.googleapis.com/tensorflow/tf-keras-datasets"
 
 
 def get_mnist():
@@ -73,9 +79,47 @@ def get_cifar():
     return ds["train"], ds["test"]
 
 
+def _get_imdb_keras_mirror():
+    """
+    Rebuilds the IMDB reviews from the Keras copy hosted on Google Cloud Storage,
+    for machines that can't reach ai.stanford.edu. Reviews come pre-tokenized as
+    word indices, so they are decoded back to (lowercased, punctuation free)
+    text, which CountVectorizer would produce from the raw text anyway.
+    """
+    cache_dir = os.path.expanduser("~/tensorflow_datasets/downloads/keras_imdb")
+    os.makedirs(cache_dir, exist_ok=True)
+    for name in ["imdb.npz", "imdb_word_index.json"]:
+        path = os.path.join(cache_dir, name)
+        if not os.path.exists(path):
+            urllib.request.urlretrieve(f"{KERAS_DATASETS_URL}/{name}", path)
+
+    with open(os.path.join(cache_dir, "imdb_word_index.json")) as f:
+        index_to_word = {i: w for w, i in json.load(f).items()}
+
+    data = np.load(os.path.join(cache_dir, "imdb.npz"), allow_pickle=True)
+    rng = np.random.default_rng(113)
+    splits = []
+    for split in ["train", "test"]:
+        text = np.array(
+            [
+                " ".join(index_to_word[i] for i in review if i in index_to_word)
+                for review in data[f"x_{split}"]
+            ]
+        )
+        # The archive is sorted by label, so shuffle it like tfds does
+        indices = rng.permutation(len(text))
+        labels = data[f"y_{split}"].astype(np.int64)
+        splits.append({"text": text[indices], "label": labels[indices]})
+    return splits[0], splits[1]
+
+
 def get_imdb():
-    imdb = tfds.builder("imdb_reviews")
-    imdb.download_and_prepare()
+    try:
+        imdb = tfds.builder("imdb_reviews")
+        imdb.download_and_prepare()
+    except Exception as e:
+        print(f"Could not download imdb_reviews via tfds ({e}), using Keras mirror")
+        return _get_imdb_keras_mirror()
 
     imdb_train, imdb_test = tfds.as_numpy(
         imdb.as_dataset(split=["train", "test"], batch_size=-1)
