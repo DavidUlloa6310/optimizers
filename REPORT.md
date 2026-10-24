@@ -11,7 +11,7 @@ The derivations behind each optimizer live in [`optim/optimizers/README.md`](opt
 - **Plain SGD at lr = 0.001 was the slowest everywhere.** It was still visibly improving at the end of every run, and on CIFAR-10 its gradient norm grew rather than shrank.
 - **RMSProp learned fastest early but became unstable late in training.** On CIFAR-10 its loss spiked and its gradient norm climbed past 40 to 80; on IMDB the spread of its per-batch loss widened over time.
 - **AdaGrad was stable but slow on harder problems.** Its accumulating denominator shrinks the effective step size, which shows up as a long, slow tail on CIFAR-10 and IMDB.
-- **"Nesterov SGD" produced curves identical to SGD with momentum.** This is an implementation issue rather than a finding; see [Known issues](#known-issues).
+- **"Nesterov SGD" produced curves identical to SGD with momentum.** This was an implementation bug rather than a finding. It has since been fixed (#3), but the Nesterov results below predate the fix; see [Known issues](#known-issues).
 - **Muon (with Adam for non-2D parameters) is implemented but has not been benchmarked yet.** No results for it exist in the repo.
 
 ## Setup
@@ -146,13 +146,13 @@ Rough ranking by training behavior, from the plots above (1 = best):
 | RMSProp | 1 (tie) | 4 | 3 | Fastest start, but unstable late without a schedule |
 | AdaGrad | 1 (tie) | 5 | 4 | Stable but its step size decays too far on long runs |
 | SGD | 6 | 6 | 5 | Too slow at lr = 0.001 on every task |
-| SGD + Nesterov | — | — | — | Currently identical to momentum, so not ranked |
+| SGD + Nesterov | — | — | — | Was identical to momentum in these runs, so not ranked |
 
 ## Known issues
 
 These affect how far the results above can be trusted.
 
-1. **Nesterov SGD is mathematically identical to classical momentum.** In `nesterov_sgd.py` the update is `-lr * (ρ·v_old + g)` and the new velocity is `ρ·v_old + g`, so the update is always just `-lr · v_new`. That is classical momentum with the learning rate folded in, and it explains why the IMDB curves are pixel-identical. (A quick numerical check of the two update rules on the same gradient sequence agrees to within 1e-17.) A true Nesterov step uses the look-ahead velocity, for example `-lr * (ρ·v_new + g)`.
+1. **Nesterov SGD was mathematically identical to classical momentum in these runs (fixed in #3).** The old `nesterov_sgd.py` stepped with `-lr * (ρ·v_old + g)` while setting the new velocity to `ρ·v_old + g`, so every step was just `-lr · v_new`. That is classical momentum with the learning rate folded in, and it explains why the IMDB curves are pixel-identical. The fix steps with `-lr * (ρ·v_new + g)`, which matches `optax.sgd(nesterov=True)` exactly. The Nesterov plots in this report come from the old code, so the benchmark needs to be re-run to get real Nesterov results.
 2. **No test metrics were saved.** `eval_model` prints test loss and accuracy but they aren't written to disk or plotted, so generalization can't be compared. Saving `BenchResult.test_loss`/`test_accuracy` to a CSV or JSON alongside the plots would fix this.
 3. **Learning rates are not tuned or matched.** SGD uses 0.001 while the momentum variants use 0.01, and every adaptive method uses 0.001. Some of the gaps above are learning-rate effects rather than algorithm effects. A small learning-rate sweep per optimizer would make the comparison fair.
 4. **Single seed, single run.** There are no error bars. Differences of a few points in the ranges above are within run-to-run noise.
